@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    /* ─── Reset & Base ───────────────────────────────────────────────── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --color-bg: #2c2c2c;
+      --color-bg-secondary: #383838;
+      --color-bg-hover: #444444;
+      --color-border: #4a4a4a;
+      --color-text: #e8e8e8;
+      --color-text-secondary: #a0a0a0;
+      --color-text-tertiary: #707070;
+      --color-primary: #0d99ff;
+      --color-primary-hover: #0b85e0;
+      --color-success: #18a957;
+      --color-warning: #f5a623;
+      --color-error: #e03e3e;
+      --color-error-bg: #3d2020;
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+      --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-size-xs: 11px;
+      --font-size-sm: 12px;
+      --font-size-md: 13px;
+      --font-size-lg: 14px;
+      --spacing-xs: 4px;
+      --spacing-sm: 8px;
+      --spacing-md: 12px;
+      --spacing-lg: 16px;
+      --spacing-xl: 20px;
+    }
+
+    body {
+      font-family: var(--font-family);
+      font-size: var(--font-size-md);
+      color: var(--color-text);
+      background-color: var(--color-bg);
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    /* ─── Layout ─────────────────────────────────────────────────────── */
+    .plugin-container {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--spacing-md) var(--spacing-lg);
+      border-bottom: 1px solid var(--color-border);
+      background-color: var(--color-bg-secondary);
+    }
+
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+    }
+
+    .header-title h1 {
+      font-size: var(--font-size-lg);
+      font-weight: 600;
+      color: var(--color-text);
+    }
+
+    .header-icon {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .header-icon svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    .content {
+      flex: 1;
+      padding: var(--spacing-lg);
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-lg);
+    }
+
+    /* ─── Sections ───────────────────────────────────────────────────── */
+    .section {
+      background-color: var(--color-bg-secondary);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--color-border);
+      overflow: hidden;
+    }
+
+    .section-header {
+      padding: var(--spacing-md) var(--spacing-lg);
+      border-bottom: 1px solid var(--color-border);
+      font-size: var(--font-size-sm);
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .section-body {
+      padding: var(--spacing-lg);
+    }
+
+    /* ─── Empty State ────────────────────────────────────────────────── */
+    #empty-state {
+      text-align: center;
+      padding: var(--spacing-xl) var(--spacing-lg);
+    }
+
+    .empty-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto var(--spacing-md);
+      opacity: 0.4;
+    }
+
+    .empty-icon svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .empty-title {
+      font-size: var(--font-size-lg);
+      font-weight: 600;
+      color: var(--color-text);
+      margin-bottom: var(--spacing-xs);
+    }
+
+    .empty-text {
+      font-size: var(--font-size-sm);
+      color: var(--color-text-secondary);
+    }
+
+    /* ─── Frame Info ─────────────────────────────────────────────────── */
+    .frame-info-grid {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: var(--spacing-xs) var(--spacing-md);
+      font-size: var(--font-size-sm);
+    }
+
+    .frame-info-label {
+      color: var(--color-text-secondary);
+      font-weight: 500;
+    }
+
+    .frame-info-value {
+      color: var(--color-text);
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ─── Buttons ────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--spacing-sm);
+      padding: var(--spacing-sm) var(--spacing-lg);
+      border: none;
+      border-radius: var(--radius-md);
+      font-family: var(--font-family);
+      font-size: var(--font-size-md);
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.15s ease, opacity 0.15s ease;
+      outline: none;
+      width: 100%;
+      height: 36px;
+    }
+
+    .btn-primary {
+      background-color: var(--color-primary);
+      color: #ffffff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background-color: var(--color-primary-hover);
+    }
+
+    .btn-primary:disabled,
+    .btn-primary.disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background-color: var(--color-bg-hover);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background-color: #505050;
+    }
+
+    .btn-ghost {
+      background: none;
+      color: var(--color-text-secondary);
+      padding: var(--spacing-xs) var(--spacing-sm);
+      font-size: var(--font-size-sm);
+      font-weight: 500;
+      width: auto;
+      height: auto;
+    }
+
+    .btn-ghost:hover {
+      color: var(--color-text);
+    }
+
+    .btn-danger {
+      background-color: var(--color-error);
+      color: #ffffff;
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      background-color: #c73434;
+    }
+
+    /* ─── Settings Panel ─────────────────────────────────────────────── */
+    #settings-panel {
+      display: none;
+    }
+
+    .settings-group {
+      margin-bottom: var(--spacing-md);
+    }
+
+    .settings-group:last-child {
+      margin-bottom: 0;
+    }
+
+    .settings-label {
+      display: block;
+      font-size: var(--font-size-xs);
+      font-weight: 500;
+      color: var(--color-text-secondary);
+      margin-bottom: var(--spacing-xs);
+    }
+
+    .settings-input,
+    .settings-select {
+      width: 100%;
+      padding: var(--spacing-sm) var(--spacing-md);
+      background-color: var(--color-bg);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      color: var(--color-text);
+      font-family: var(--font-family);
+      font-size: var(--font-size-sm);
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+
+    .settings-input:focus,
+    .settings-select:focus {
+      border-color: var(--color-primary);
+    }
+
+    .settings-input::placeholder {
+      color: var(--color-text-tertiary);
+    }
+
+    .settings-row {
+      display: flex;
+      gap: var(--spacing-md);
+    }
+
+    .settings-row > .settings-group {
+      flex: 1;
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      cursor: pointer;
+    }
+
+    .checkbox-group input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--color-primary);
+      cursor: pointer;
+    }
+
+    .checkbox-group label {
+      font-size: var(--font-size-sm);
+      color: var(--color-text);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    /* ─── Progress ───────────────────────────────────────────────────── */
+    .progress-container {
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-md);
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background-color: var(--color-bg);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background-color: var(--color-primary);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+
+    .progress-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .progress-text {
+      flex: 1;
+    }
+
+    .progress-step {
+      display: block;
+      font-size: var(--font-size-sm);
+      font-weight: 600;
+      color: var(--color-text);
+      margin-bottom: 2px;
+    }
+
+    .progress-detail {
+      display: block;
+      font-size: var(--font-size-xs);
+      color: var(--color-text-secondary);
+      word-break: break-word;
+    }
+
+    .progress-percent {
+      font-size: var(--font-size-sm);
+      font-weight: 700;
+      color: var(--color-primary);
+      min-width: 36px;
+      text-align: right;
+    }
+
+    /* ─── Error ──────────────────────────────────────────────────────── */
+    #error-section {
+      background-color: var(--color-error-bg);
+      border-color: #5a2020;
+    }
+
+    .error-content {
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-sm);
+    }
+
+    .error-icon {
+      color: var(--color-error);
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    #error-message {
+      font-size: var(--font-size-sm);
+      color: #f0a0a0;
+      line-height: 1.5;
+    }
+
+    #error-details {
+      font-size: var(--font-size-xs);
+      color: var(--color-text-secondary);
+      background-color: rgba(0, 0, 0, 0.2);
+      padding: var(--spacing-sm);
+      border-radius: var(--radius-sm);
+      font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 80px;
+      overflow-y: auto;
+    }
+
+    /* ─── Results ────────────────────────────────────────────────────── */
+    .results-content {
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-lg);
+    }
+
+    .scores-grid {
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-sm);
+    }
+
+    .score-row {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+    }
+
+    .score-label {
+      font-size: var(--font-size-xs);
+      color: var(--color-text-secondary);
+      min-width: 80px;
+      font-weight: 500;
+    }
+
+    .score-bar {
+      flex: 1;
+      height: 6px;
+      background-color: var(--color-bg);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .score-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+      background-color: var(--color-success);
+    }
+
+    .score-value {
+      font-size: var(--font-size-xs);
+      font-weight: 700;
+      color: var(--color-text);
+      min-width: 24px;
+      text-align: right;
+    }
+
+    .download-links {
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-sm);
+    }
+
+    .download-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: var(--spacing-sm) var(--spacing-md);
+      border-radius: var(--radius-md);
+      font-size: var(--font-size-sm);
+      font-weight: 600;
+      text-decoration: none;
+      transition: background-color 0.15s ease;
+    }
+
+    .download-primary {
+      background-color: var(--color-primary);
+      color: #ffffff;
+    }
+
+    .download-primary:hover {
+      background-color: var(--color-primary-hover);
+    }
+
+    .download-secondary {
+      background-color: var(--color-bg-hover);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
+
+    .download-secondary:hover {
+      background-color: #505050;
+    }
+
+    .download-link.download-link {
+      /* specificity bump for external link style */
+      color: var(--color-primary);
+      background: none;
+      padding: var(--spacing-xs) 0;
+      font-weight: 500;
+    }
+
+    .download-link.download-link:hover {
+      text-decoration: underline;
+    }
+
+    /* ─── Differences ────────────────────────────────────────────────── */
+    #differences-list {
+      display: none;
+    }
+
+    #differences-list h4 {
+      font-size: var(--font-size-xs);
+      color: var(--color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .diff-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: var(--spacing-xs) var(--spacing-sm);
+      border-radius: var(--radius-sm);
+      font-size: var(--font-size-xs);
+      margin-bottom: 2px;
+    }
+
+    .diff-high {
+      background-color: rgba(224, 62, 62, 0.1);
+    }
+
+    .diff-medium {
+      background-color: rgba(245, 166, 35, 0.1);
+    }
+
+    .diff-low {
+      background-color: rgba(24, 169, 87, 0.1);
+    }
+
+    .diff-name {
+      font-weight: 600;
+      color: var(--color-text);
+    }
+
+    .diff-issue {
+      color: var(--color-text-secondary);
+    }
+
+    /* ─── Footer ─────────────────────────────────────────────────────── */
+    .footer {
+      padding: var(--spacing-sm) var(--spacing-lg);
+      border-top: 1px solid var(--color-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .footer-text {
+      font-size: var(--font-size-xs);
+      color: var(--color-text-tertiary);
+    }
+
+    /* ─── Animations ─────────────────────────────────────────────────── */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .fade-in {
+      animation: fadeIn 0.2s ease;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .pulse {
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="plugin-container">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-title">
+        <div class="header-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+        </div>
+        <h1>Figma to HTML/CSS</h1>
+      </div>
+      <button id="settings-toggle" class="btn btn-ghost">Settings</button>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+
+      <!-- Empty State (no selection) -->
+      <div id="empty-state" class="fade-in">
+        <div class="empty-icon">
+          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.5">
+            <rect x="6" y="6" width="36" height="36" rx="4"></rect>
+            <line x1="6" y1="18" x2="42" y2="18"></line>
+            <line x1="18" y1="18" x2="18" y2="42"></line>
+          </svg>
+        </div>
+        <div class="empty-title">No frame selected</div>
+        <div class="empty-text">Select a frame, component, or section in your design to get started.</div>
+      </div>
+
+      <!-- Frame Info -->
+      <div id="frame-info" class="section fade-in" style="display: none;">
+        <div class="section-header">Selected Frame</div>
+        <div class="section-body">
+          <div class="frame-info-grid">
+            <span class="frame-info-label">Name</span>
+            <span id="frame-name" class="frame-info-value">--</span>
+            <span class="frame-info-label">Size</span>
+            <span id="frame-dimensions" class="frame-info-value">--</span>
+            <span class="frame-info-label">Nodes</span>
+            <span id="node-count" class="frame-info-value">--</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Panel -->
+      <div id="settings-panel" class="section fade-in">
+        <div class="section-header">Export Settings</div>
+        <div class="section-body">
+          <div class="settings-group">
+            <label class="settings-label" for="backend-url">Backend URL</label>
+            <input
+              id="backend-url"
+              type="text"
+              class="settings-input"
+              placeholder="http://localhost:8000"
+              value="http://localhost:8000"
+            />
+          </div>
+
+          <div class="settings-row" style="margin-top: 12px;">
+            <div class="settings-group">
+              <label class="settings-label" for="asset-format">Asset Format</label>
+              <select id="asset-format" class="settings-select">
+                <option value="PNG">PNG</option>
+                <option value="SVG">SVG</option>
+              </select>
+            </div>
+            <div class="settings-group">
+              <label class="settings-label" for="asset-scale">Asset Scale</label>
+              <select id="asset-scale" class="settings-select">
+                <option value="1">1x</option>
+                <option value="2" selected>2x</option>
+                <option value="3">3x</option>
+                <option value="4">4x</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+            <div class="checkbox-group">
+              <input type="checkbox" id="export-assets" checked />
+              <label for="export-assets">Export images and vectors</label>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="include-invisible" />
+              <label for="include-invisible">Include hidden layers</label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Export Button -->
+      <button id="export-btn" class="btn btn-primary" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 18 22 12 16 6"></polyline>
+          <polyline points="8 6 2 12 8 18"></polyline>
+        </svg>
+        Export to HTML/CSS
+      </button>
+
+      <!-- Progress Section -->
+      <div id="progress-section" class="section fade-in" style="display: none;">
+        <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>Progress</span>
+          <button id="cancel-btn" class="btn btn-ghost" style="margin: -4px 0;">Cancel</button>
+        </div>
+        <div class="section-body">
+          <div class="progress-container">
+            <div class="progress-bar">
+              <div id="progress-bar-fill" class="progress-bar-fill"></div>
+            </div>
+            <div class="progress-info">
+              <div class="progress-text">
+                <span id="progress-step" class="progress-step">Initializing...</span>
+                <span id="progress-detail" class="progress-detail">Preparing export</span>
+              </div>
+              <span id="progress-percent" class="progress-percent">0%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Section -->
+      <div id="error-section" class="section fade-in" style="display: none;">
+        <div class="section-body">
+          <div class="error-content">
+            <div class="error-icon">Error</div>
+            <p id="error-message">An unknown error occurred.</p>
+            <p id="error-details" style="display: none;"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Results Section -->
+      <div id="results-section" class="section fade-in" style="display: none;">
+        <div class="section-header">Results</div>
+        <div class="section-body">
+          <div class="results-content">
+            <!-- Verification Scores -->
+            <div class="scores-grid">
+              <div class="score-row" id="score-overall">
+                <span class="score-label">Overall</span>
+                <div class="score-bar"><div class="score-fill" style="width: 0%"></div></div>
+                <span class="score-value">--</span>
+              </div>
+              <div class="score-row" id="score-layout">
+                <span class="score-label">Layout</span>
+                <div class="score-bar"><div class="score-fill" style="width: 0%"></div></div>
+                <span class="score-value">--</span>
+              </div>
+              <div class="score-row" id="score-color">
+                <span class="score-label">Colors</span>
+                <div class="score-bar"><div class="score-fill" style="width: 0%"></div></div>
+                <span class="score-value">--</span>
+              </div>
+              <div class="score-row" id="score-typography">
+                <span class="score-label">Typography</span>
+                <div class="score-bar"><div class="score-fill" style="width: 0%"></div></div>
+                <span class="score-value">--</span>
+              </div>
+              <div class="score-row" id="score-spacing">
+                <span class="score-label">Spacing</span>
+                <div class="score-bar"><div class="score-fill" style="width: 0%"></div></div>
+                <span class="score-value">--</span>
+              </div>
+            </div>
+
+            <!-- Download Links -->
+            <div id="download-links" class="download-links"></div>
+
+            <!-- Differences -->
+            <div id="differences-list"></div>
+
+            <!-- New Export Button -->
+            <button id="new-export-btn" class="btn btn-secondary">Export Another Frame</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <span class="footer-text">v1.0.0</span>
+      <span class="footer-text">Figma to HTML/CSS</span>
+    </div>
+  </div>
+
+  <!-- UI_SCRIPT_PLACEHOLDER -->
+</body>
+</html>

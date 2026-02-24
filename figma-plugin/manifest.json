@@ -1,0 +1,12 @@
+{
+  "name": "Figma to HTML/CSS",
+  "id": "figma-to-html-css-converter",
+  "api": "1.0.0",
+  "main": "dist/main.js",
+  "ui": "dist/ui.html",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "The plugin sends design data to a local backend server for HTML/CSS code generation."
+  }
+}
