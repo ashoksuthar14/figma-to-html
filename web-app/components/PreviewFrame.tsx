@@ -21,6 +21,8 @@ export default function PreviewFrame() {
   const vh = useEditorStore((s) => s.viewportHeight);
   const scale = useEditorStore((s) => s.scale);
   const selectNode = useEditorStore((s) => s.selectNode);
+  const toggleNodeSelection = useEditorStore((s) => s.toggleNodeSelection);
+  const selectedNodes = useEditorStore((s) => s.selectedNodes);
   const setScale = useEditorStore((s) => s.setScale);
   const setLayoutInfo = useEditorStore((s) => s.setLayoutInfo);
   const setIframeContainerRect = useEditorStore((s) => s.setIframeContainerRect);
@@ -52,7 +54,11 @@ export default function PreviewFrame() {
           href: msg.href,
           target: msg.target,
         };
-        selectNode(node);
+        if (msg.ctrlKey || msg.shiftKey) {
+          toggleNodeSelection(node);
+        } else {
+          selectNode(node);
+        }
         return;
       }
 
@@ -61,13 +67,22 @@ export default function PreviewFrame() {
         setLayoutInfo(msg.layoutInfo, msg.rect, msg.parentRect);
       }
     },
-    [selectNode, setLayoutInfo]
+    [selectNode, toggleNodeSelection, setLayoutInfo]
   );
 
   useEffect(() => {
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
   }, [handleMessage]);
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow) return;
+    iframe.contentWindow.postMessage(
+      { type: "highlight-nodes", nodeIds: selectedNodes.map((n) => n.nodeId) },
+      "*"
+    );
+  }, [selectedNodes]);
 
   useEffect(() => {
     if (!containerRef.current) return;

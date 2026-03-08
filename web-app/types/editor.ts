@@ -67,6 +67,13 @@ export interface ComputedSpacing {
   paddingRight: string;
   paddingBottom: string;
   paddingLeft: string;
+  fontSize: string;
+  lineHeight: string;
+  letterSpacing: string;
+  gap: string;
+  parentGap: string;
+  parentDisplay: string;
+  parentFlexDirection: string;
 }
 
 export interface SelectedNode {
@@ -78,6 +85,44 @@ export interface SelectedNode {
   computedStyles?: ComputedSpacing;
   href?: string;
   target?: string;
+}
+
+export interface FigmaTextSegment {
+  characters: string;
+  fontSize: number;
+  lineHeight: number | null;
+  lineHeightUnit: string;
+  letterSpacing: number;
+  fontFamily: string;
+  fontWeight: number;
+}
+
+export interface FigmaTextInfo {
+  fontSize: number;
+  lineHeight: number | null;
+  lineHeightUnit: string;
+  letterSpacing: number;
+  letterSpacingUnit: string;
+  paragraphSpacing: number;
+  textAlignHorizontal: string;
+  segments: FigmaTextSegment[];
+}
+
+export interface FigmaLayoutInfo {
+  mode: string;
+  gap: number;
+  padding: { top: number; right: number; bottom: number; left: number };
+  direction: string;
+  primaryAxisAlign?: string;
+  counterAxisAlign?: string;
+}
+
+export interface FigmaNodeProperties {
+  text: FigmaTextInfo | null;
+  layout: FigmaLayoutInfo;
+  parentLayout: FigmaLayoutInfo | null;
+  name: string;
+  type: string;
 }
 
 export interface EditOperation {
@@ -187,6 +232,8 @@ export interface IframeNodeClickMessage {
   computedStyles?: ComputedSpacing;
   href?: string;
   target?: string;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
 }
 
 export interface EditorState {
@@ -206,6 +253,7 @@ export interface EditorState {
 
   selectedNodeId: string | null;
   selectedNode: SelectedNode | null;
+  selectedNodes: SelectedNode[];
   isEditing: boolean;
 
   editHistory: EditOperation[];
@@ -218,7 +266,7 @@ export interface EditorState {
   fixHistory: FixHistoryEntry[];
   isFixing: boolean;
   showAIFixModal: boolean;
-  activeTab: "text" | "spacing" | "link";
+  activeTab: "text" | "spacing" | "link" | "typography";
 
   isPositionMode: boolean;
   isDragging: boolean;
@@ -235,6 +283,7 @@ export interface EditorState {
   setViewport: (width: number, height: number) => void;
   setScale: (scale: number) => void;
   selectNode: (node: SelectedNode) => void;
+  toggleNodeSelection: (node: SelectedNode) => void;
   clearSelection: () => void;
   applyEdit: (op: EditOperation, newHtml: string, newCss?: string) => void;
   undo: () => void;
@@ -245,7 +294,7 @@ export interface EditorState {
   setSpacingDraft: (draft: Record<string, string> | null) => void;
   setIsFixing: (fixing: boolean) => void;
   setShowAIFixModal: (show: boolean) => void;
-  setActiveTab: (tab: "text" | "spacing" | "link") => void;
+  setActiveTab: (tab: "text" | "spacing" | "link" | "typography") => void;
   addFixHistory: (entry: FixHistoryEntry) => void;
   enterPositionMode: () => void;
   exitPositionMode: () => void;

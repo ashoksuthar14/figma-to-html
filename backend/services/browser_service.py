@@ -77,16 +77,32 @@ def build_full_html(
     _css_reset = (_templates_dir / "css_reset.css").read_text(encoding="utf-8")
 
     # Build Google Fonts link tags if fonts are provided
+    _VARIABLE_WIDTH_FONTS: dict[str, str] = {
+        "League Gothic": "family=League+Gothic:wdth,wght@75..100,400",
+    }
+
     fonts_link = ""
     if fonts:
+        family_params: list[str] = []
+        for f in fonts:
+            if not f:
+                continue
+            if f in _VARIABLE_WIDTH_FONTS:
+                family_params.append(_VARIABLE_WIDTH_FONTS[f])
+            else:
+                axes = ";".join(
+                    f"{ital},{w}"
+                    for ital in (0, 1)
+                    for w in (100, 200, 300, 400, 500, 600, 700, 800, 900)
+                )
+                family_params.append(
+                    f"family={f.replace(' ', '+')}:ital,wght@{axes}"
+                )
         fonts_link = (
             '    <link rel="preconnect" href="https://fonts.googleapis.com">\n'
             '    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
             '    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
-            + "&".join(
-                f"family={f.replace(' ', '+')}:wght@100;200;300;400;500;600;700;800;900"
-                for f in fonts if f
-            )
+            + "&".join(family_params)
             + '&display=swap">\n'
         )
 

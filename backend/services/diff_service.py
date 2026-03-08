@@ -26,6 +26,13 @@ GRID_COLS = 8
 GRID_ROWS = 8
 
 
+def _adaptive_grid(h: int, w: int) -> tuple[int, int]:
+    """Scale grid rows based on aspect ratio so tall pages get finer cells."""
+    aspect = h / max(w, 1)
+    rows = max(GRID_ROWS, min(64, int(GRID_ROWS * aspect)))
+    return rows, GRID_COLS
+
+
 def _load_image(data: bytes) -> np.ndarray:
     """Load image bytes into a numpy array (RGB).
 
@@ -64,10 +71,10 @@ def _downscale_for_comparison(img: np.ndarray, max_dim: int = 16000) -> np.ndarr
 
 
 def _resize_to_match(img_a: np.ndarray, img_b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Align image dimensions by center-cropping to the smaller size (no scaling).
+    """Align image dimensions via center-crop to the smaller of each axis.
 
-    Cropping preserves pixel alignment; scaling would distort positions and
-    cause false layout mismatches.
+    The Figma screenshot is pre-cropped to the frame bounds in the
+    verification agent, so this only handles minor pixel differences.
     """
     h_a, w_a = img_a.shape[:2]
     h_b, w_b = img_b.shape[:2]
@@ -88,16 +95,18 @@ def _resize_to_match(img_a: np.ndarray, img_b: np.ndarray) -> tuple[np.ndarray, 
 
     img_a = _crop_center(img_a, target_h, target_w)
     img_b = _crop_center(img_b, target_h, target_w)
+    logger.info("Cropped images to match: (%d, %d) & (%d, %d) -> (%d, %d)",
+                 h_a, w_a, h_b, w_b, target_h, target_w)
     return img_a, img_b
 
 
-def _pixel_diff(img_a: np.ndarray, img_b: np.ndarray, threshold: int = 64) -> np.ndarray:
+def _pixel_diff(img_a: np.ndarray, img_b: np.ndarray, threshold: int = 80) -> np.ndarray:
     """Compute per-pixel difference mask.
 
     Args:
         img_a: First image array (H, W, 3).
         img_b: Second image array (H, W, 3).
-        threshold: Per-channel difference threshold to count as mismatch (64 allows font anti-aliasing differences).
+        threshold: Per-channel difference threshold to count as mismatch (80 tolerates font anti-aliasing and sub-pixel rendering).
 
     Returns:
         Boolean mask (H, W) where True = pixel mismatch.
@@ -195,28 +204,44 @@ def _classify_mismatch(
     """
     diff = np.abs(cell_a.astype(np.int16) - cell_b.astype(np.int16))
 
-    # Convert to grayscale for structural analysis
     gray_a = np.mean(cell_a, axis=2).astype(np.float64)
     gray_b = np.mean(cell_b, axis=2).astype(np.float64)
     gray_diff = float(np.mean(np.abs(gray_a - gray_b)))
 
-    # Edge-based structural difference
     edges_a = _simple_edge_magnitude(gray_a)
     edges_b = _simple_edge_magnitude(gray_b)
     edge_diff = float(np.mean(np.abs(edges_a - edges_b)))
 
-    # Colour-only difference (remove luminance component)
     mean_diff = float(np.mean(diff))
     color_diff = mean_diff - gray_diff
 
-    # Layout: both edge structure AND gray values differ significantly
+    # Proportion of mismatched pixels within the cell (sparse = text-like)
+    pixel_diff_mask = np.any(diff > 40, axis=2)
+    mismatch_ratio = float(np.mean(pixel_diff_mask))
+
+    # High-frequency texture check: text rendering differences produce many
+    # small scattered pixel differences rather than large uniform blocks.
+    edge_density_a = float(np.mean(edges_a > 15))
+    edge_density_b = float(np.mean(edges_b > 15))
+    avg_edge_density = (edge_density_a + edge_density_b) / 2
+
     if edge_diff > 20 and gray_diff > 80:
         return "Layout/structural position mismatch"
     if color_diff > 30:
         return "Color/background fill mismatch"
-    if gray_diff > 40:
+    # Typography: only classify when region is clearly text-dominated.
+    # Requires high edge density (many glyph edges) AND scattered diffs.
+    if avg_edge_density > 0.12 and mismatch_ratio < 0.5 and gray_diff > 35:
         return "Typography/font text mismatch"
-    return "Spacing/alignment gap mismatch"
+    if gray_diff > 60 and avg_edge_density > 0.10:
+        return "Typography/font text mismatch"
+    # Spacing: uniform blocks shifted or gaps changed — low edge density,
+    # contiguous mismatch regions
+    if mismatch_ratio > 0.3 and edge_diff < 15:
+        return "Spacing/alignment gap mismatch"
+    if gray_diff > 40 and mismatch_ratio > 0.5:
+        return "Spacing/alignment gap mismatch"
+    return "General visual mismatch"
 
 
 def _analyze_regions(
@@ -403,12 +428,7 @@ async def compare_images(
     arr_b = _load_image(image_b)
 
     # Ensure same dimensions
-    orig_a_shape = arr_a.shape[:2]
-    orig_b_shape = arr_b.shape[:2]
     arr_a, arr_b = _resize_to_match(arr_a, arr_b)
-    if orig_a_shape != arr_b.shape[:2] or orig_b_shape != arr_a.shape[:2]:
-        logger.info("Resized images to match: %s & %s -> %s",
-                     orig_a_shape, orig_b_shape, arr_a.shape[:2])
 
     h, w = arr_a.shape[:2]
     total_pixels = h * w
@@ -424,15 +444,13 @@ async def compare_images(
     arr_b_ssim = _downscale_for_comparison(arr_b, max_dim=SSIM_MAX_DIM)
     ssim_score = _compute_ssim(arr_a_ssim, arr_b_ssim)
 
-    # Dynamic grid rows: scale based on image aspect ratio for tall designs
-    aspect_ratio = h / max(w, 1)
-    dynamic_rows = GRID_ROWS
-    if aspect_ratio > 2.0:
-        dynamic_rows = min(int(GRID_ROWS * aspect_ratio / 1.0), 32)
+    # Adaptive grid: tall pages get more rows for finer region analysis
+    dynamic_rows, dynamic_cols = _adaptive_grid(h, w)
 
     # Region analysis (pass images for mismatch classification)
     regions = _analyze_regions(
-        mismatch_mask, img_a=arr_a, img_b=arr_b, grid_rows=dynamic_rows,
+        mismatch_mask, img_a=arr_a, img_b=arr_b,
+        grid_rows=dynamic_rows, grid_cols=dynamic_cols,
     )
 
     # Generate and optionally save diff heatmap

@@ -37,6 +37,8 @@ export function getIframeInjectionScript(): string {
 
     var rect = target.getBoundingClientRect();
     var cs = window.getComputedStyle(target);
+    var parentEl = target.parentElement;
+    var pcs = parentEl ? window.getComputedStyle(parentEl) : null;
     var computedStyles = {
       marginTop: cs.marginTop,
       marginRight: cs.marginRight,
@@ -45,7 +47,14 @@ export function getIframeInjectionScript(): string {
       paddingTop: cs.paddingTop,
       paddingRight: cs.paddingRight,
       paddingBottom: cs.paddingBottom,
-      paddingLeft: cs.paddingLeft
+      paddingLeft: cs.paddingLeft,
+      fontSize: cs.fontSize,
+      lineHeight: cs.lineHeight,
+      letterSpacing: cs.letterSpacing,
+      gap: cs.gap,
+      parentGap: pcs ? pcs.gap : '',
+      parentDisplay: pcs ? pcs.display : '',
+      parentFlexDirection: pcs ? pcs.flexDirection : ''
     };
 
     var href = '';
@@ -75,11 +84,30 @@ export function getIframeInjectionScript(): string {
       },
       computedStyles: computedStyles,
       href: href,
-      target: linkTarget
+      target: linkTarget,
+      ctrlKey: e.ctrlKey || e.metaKey,
+      shiftKey: e.shiftKey
     }, '*');
   }, true);
 
+  var multiSelected = [];
   window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'highlight-nodes') {
+      multiSelected.forEach(function(el) {
+        el.style.outline = '';
+        el.style.outlineOffset = '';
+      });
+      multiSelected = [];
+      (e.data.nodeIds || []).forEach(function(id) {
+        var el = document.querySelector('[data-node-id="' + id + '"]');
+        if (el) {
+          el.style.outline = '2px solid rgba(139,92,246,0.7)';
+          el.style.outlineOffset = '-2px';
+          multiSelected.push(el);
+        }
+      });
+      return;
+    }
     if (!e.data || e.data.type !== 'get-layout-info' || !e.data.nodeId) return;
     var el = document.querySelector('[data-node-id="' + e.data.nodeId + '"]');
     if (!el) return;

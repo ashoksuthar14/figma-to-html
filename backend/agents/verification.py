@@ -81,6 +81,27 @@ class VerificationAgent(BaseAgent):
         try:
             figma_img = Image.open(io.BytesIO(figma_screenshot))
             logger.info("[job:%s] Figma screenshot dimensions: %dx%d", self.job_id, figma_img.width, figma_img.height)
+
+            render_scale = 2
+            expected_w = width * render_scale
+            expected_h = height * render_scale
+
+            if figma_img.width > int(expected_w * 1.2) or figma_img.height > int(expected_h * 1.2):
+                orig_w, orig_h = figma_img.width, figma_img.height
+                crop_w = min(expected_w, figma_img.width)
+                crop_h = min(expected_h, figma_img.height)
+                left = 0
+                top = 0
+                figma_img = figma_img.crop((left, top, left + crop_w, top + crop_h))
+                buf = io.BytesIO()
+                figma_img.save(buf, format="PNG")
+                figma_screenshot = buf.getvalue()
+                figma_path.write_bytes(figma_screenshot)
+                logger.info(
+                    "[job:%s] Pre-cropped Figma screenshot from %dx%d to %dx%d (expected %dx%d)",
+                    self.job_id, orig_w, orig_h, figma_img.width, figma_img.height,
+                    expected_w, expected_h,
+                )
         except Exception:
             pass
 

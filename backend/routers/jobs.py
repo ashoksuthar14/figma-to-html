@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import json as json_module
 import logging
 import shutil
 import zipfile
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from config import settings
@@ -65,8 +66,6 @@ async def create_job(
 
     Returns the job ID and initial status. The pipeline runs in the background.
     """
-    import json as json_module
-
     design_spec: Optional[DesignSpec] = None
     files: list[UploadFile] = []
     content_type = request.headers.get("content-type", "")
@@ -505,6 +504,117 @@ async def download_job(job_id: str) -> StreamingResponse:
             "Content-Disposition": f'attachment; filename="figma-export-{job_id[:8]}.zip"'
         },
     )
+
+
+def _walk_nodes(
+    node: dict[str, Any],
+    target_ids: set[str],
+    parent: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Walk a design-spec node tree and collect properties for target IDs."""
+    result: dict[str, dict[str, Any]] = {}
+    node_id = node.get("id", "")
+
+    if node_id in target_ids:
+        text_info = node.get("text")
+        text_out: dict[str, Any] | None = None
+        if text_info:
+            seg = text_info.get("segments", [{}])[0] if text_info.get("segments") else {}
+            text_out = {
+                "fontSize": seg.get("fontSize", 16),
+                "lineHeight": seg.get("lineHeight"),
+                "lineHeightUnit": seg.get("lineHeightUnit", "AUTO"),
+                "letterSpacing": seg.get("letterSpacing", 0),
+                "letterSpacingUnit": seg.get("letterSpacingUnit", "PIXELS"),
+                "paragraphSpacing": text_info.get("paragraphSpacing", 0),
+                "textAlignHorizontal": text_info.get("textAlignHorizontal", "LEFT"),
+                "segments": [
+                    {
+                        "characters": s.get("characters", ""),
+                        "fontSize": s.get("fontSize", 16),
+                        "lineHeight": s.get("lineHeight"),
+                        "lineHeightUnit": s.get("lineHeightUnit", "AUTO"),
+                        "letterSpacing": s.get("letterSpacing", 0),
+                        "fontFamily": s.get("fontFamily", ""),
+                        "fontWeight": s.get("fontWeight", 400),
+                    }
+                    for s in text_info.get("segments", [])
+                ],
+            }
+
+        layout = node.get("layout", {})
+        layout_out = {
+            "mode": layout.get("mode", layout.get("type", "NONE")),
+            "gap": layout.get("gap", layout.get("itemSpacing", 0)),
+            "padding": {
+                "top": layout.get("paddingTop", layout.get("padding", {}).get("top", 0) if isinstance(layout.get("padding"), dict) else 0),
+                "right": layout.get("paddingRight", layout.get("padding", {}).get("right", 0) if isinstance(layout.get("padding"), dict) else 0),
+                "bottom": layout.get("paddingBottom", layout.get("padding", {}).get("bottom", 0) if isinstance(layout.get("padding"), dict) else 0),
+                "left": layout.get("paddingLeft", layout.get("padding", {}).get("left", 0) if isinstance(layout.get("padding"), dict) else 0),
+            },
+            "direction": layout.get("direction", layout.get("mode", "NONE")),
+            "primaryAxisAlign": layout.get("primaryAxisAlign", "MIN"),
+            "counterAxisAlign": layout.get("counterAxisAlign", "MIN"),
+        }
+
+        parent_layout_out: dict[str, Any] | None = None
+        if parent:
+            pl = parent.get("layout", {})
+            parent_layout_out = {
+                "mode": pl.get("mode", pl.get("type", "NONE")),
+                "gap": pl.get("gap", pl.get("itemSpacing", 0)),
+                "padding": {
+                    "top": pl.get("paddingTop", pl.get("padding", {}).get("top", 0) if isinstance(pl.get("padding"), dict) else 0),
+                    "right": pl.get("paddingRight", pl.get("padding", {}).get("right", 0) if isinstance(pl.get("padding"), dict) else 0),
+                    "bottom": pl.get("paddingBottom", pl.get("padding", {}).get("bottom", 0) if isinstance(pl.get("padding"), dict) else 0),
+                    "left": pl.get("paddingLeft", pl.get("padding", {}).get("left", 0) if isinstance(pl.get("padding"), dict) else 0),
+                },
+                "direction": pl.get("direction", pl.get("mode", "NONE")),
+            }
+
+        result[node_id] = {
+            "text": text_out,
+            "layout": layout_out,
+            "parentLayout": parent_layout_out,
+            "name": node.get("name", ""),
+            "type": node.get("type", ""),
+        }
+
+    for child in node.get("children", []):
+        result.update(_walk_nodes(child, target_ids, parent=node))
+
+    return result
+
+
+@router.get("/{job_id}/design-spec/nodes")
+async def get_design_spec_nodes(
+    job_id: str,
+    ids: str = Query("", description="Comma-separated node IDs"),
+) -> JSONResponse:
+    """Return Figma design-spec properties for the requested node IDs."""
+    spec_path = Path(settings.TEMP_DIR) / job_id / "design_spec.json"
+    if not spec_path.exists():
+        raise HTTPException(status_code=404, detail=f"Design spec not found for job {job_id}")
+
+    try:
+        spec_data = json_module.loads(spec_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read design spec: {e}")
+
+    root = spec_data.get("root")
+    if root is None:
+        nodes_list = spec_data.get("nodes", [])
+        root = nodes_list[0] if nodes_list else None
+    if root is None:
+        raise HTTPException(status_code=404, detail="No root node in design spec")
+
+    target_ids = {i.strip() for i in ids.split(",") if i.strip()} if ids else set()
+    if not target_ids:
+        raise HTTPException(status_code=422, detail="Provide at least one node ID via ?ids=")
+
+    nodes_map = _walk_nodes(root, target_ids)
+
+    return JSONResponse(content={"nodes": nodes_map})
 
 
 @router.post("/{job_id}/micro-fix")

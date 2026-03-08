@@ -9,7 +9,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from schemas.design_spec import DesignSpec, _CamelBase
-from schemas.diff_report import DiffReport, DiffRegion
+from schemas.diff_report import DiffReport, DiffRegion, Severity
 
 
 class JobStatus(str, Enum):
@@ -84,34 +84,41 @@ class PluginVerificationResult(_CamelBase):
         pixel_accuracy = 100.0 - report.pixel_mismatch_percent
         overall = report.ssim_score * 35 + pixel_accuracy * 0.65
 
-        # Derive sub-scores from overall, penalised by region issue keywords.
-        # Use mutually-exclusive classification: each region penalises only one
-        # category. Scale penalty by proportion of affected regions, and cap
-        # each category's total penalty at 50 points.
         layout_penalty = 0.0
         color_penalty = 0.0
-        typo_penalty = 0.0
         spacing_penalty = 0.0
+        typo_region_penalties: list[float] = []
 
-        total_regions = max(len(report.regions), 1)
+        _severity_weight = {
+            Severity.HIGH: 1.0,
+            Severity.MEDIUM: 0.5,
+            Severity.LOW: 0.2,
+        }
+
+        _TYPO_MULTIPLIER = 4
+        _DEFAULT_MULTIPLIER = 6
+        _TYPO_REGION_CAP = 20
 
         for region in report.regions:
             issue_lower = region.issue.lower()
             weight = region.mismatch_percent / 100.0
-            # Mutually exclusive: first match wins
-            if any(kw in issue_lower for kw in ("layout", "position", "size")):
-                layout_penalty += weight * 10
-            elif any(kw in issue_lower for kw in ("color", "background", "fill", "gradient")):
-                color_penalty += weight * 10
-            elif any(kw in issue_lower for kw in ("font", "text", "typography", "letter")):
-                typo_penalty += weight * 10
-            elif any(kw in issue_lower for kw in ("spacing", "padding", "margin", "gap", "align")):
-                spacing_penalty += weight * 10
+            sev_mult = _severity_weight.get(region.severity, 0.5)
 
-        # Cap each category penalty at 50 points
+            if any(kw in issue_lower for kw in ("layout", "position", "size")):
+                layout_penalty += weight * _DEFAULT_MULTIPLIER * sev_mult
+            elif any(kw in issue_lower for kw in ("color", "background", "fill", "gradient")):
+                color_penalty += weight * _DEFAULT_MULTIPLIER * sev_mult
+            elif any(kw in issue_lower for kw in ("font", "text", "typography", "letter")):
+                typo_region_penalties.append(weight * _TYPO_MULTIPLIER * sev_mult)
+            elif any(kw in issue_lower for kw in ("spacing", "padding", "margin", "gap", "align")):
+                spacing_penalty += weight * _DEFAULT_MULTIPLIER * sev_mult
+
+        typo_region_penalties.sort(reverse=True)
+        typo_penalty = sum(typo_region_penalties[:_TYPO_REGION_CAP])
+
         layout_penalty = min(layout_penalty, 50.0)
         color_penalty = min(color_penalty, 50.0)
-        typo_penalty = min(typo_penalty, 50.0)
+        typo_penalty = min(typo_penalty, 35.0)
         spacing_penalty = min(spacing_penalty, 50.0)
 
         layout_score = max(0.0, overall - layout_penalty)

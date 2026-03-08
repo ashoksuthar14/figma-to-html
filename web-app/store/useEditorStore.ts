@@ -26,6 +26,7 @@ const initialState = {
 
   selectedNodeId: null as string | null,
   selectedNode: null as SelectedNode | null,
+  selectedNodes: [] as SelectedNode[],
   isEditing: false,
 
   editHistory: [] as EditOperation[],
@@ -38,7 +39,7 @@ const initialState = {
   fixHistory: [] as FixHistoryEntry[],
   isFixing: false,
   showAIFixModal: false,
-  activeTab: "text" as "text" | "spacing" | "link",
+  activeTab: "text" as "text" | "spacing" | "link" | "typography",
 
   isPositionMode: false,
   isDragging: false,
@@ -66,6 +67,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       editHistory: [],
       selectedNodeId: null,
       selectedNode: null,
+      selectedNodes: [],
       isEditing: false,
       spacingDraft: null,
       fixHistory: [],
@@ -91,14 +93,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({
       selectedNodeId: node.nodeId,
       selectedNode: node,
+      selectedNodes: [node],
       isEditing: true,
       activeTab: "text",
+    }),
+
+  toggleNodeSelection: (node) =>
+    set((state) => {
+      const exists = state.selectedNodes.some((n) => n.nodeId === node.nodeId);
+      let newNodes: SelectedNode[];
+      if (exists) {
+        newNodes = state.selectedNodes.filter((n) => n.nodeId !== node.nodeId);
+      } else {
+        newNodes = [...state.selectedNodes, node];
+      }
+      const primary = newNodes.length > 0 ? newNodes[newNodes.length - 1] : null;
+      return {
+        selectedNodes: newNodes,
+        selectedNode: primary,
+        selectedNodeId: primary?.nodeId ?? null,
+        isEditing: newNodes.length > 0,
+        activeTab: newNodes.length > 1 ? "typography" : state.activeTab,
+      };
     }),
 
   clearSelection: () =>
     set({
       selectedNodeId: null,
       selectedNode: null,
+      selectedNodes: [],
       isEditing: false,
       spacingDraft: null,
       showAIFixModal: false,

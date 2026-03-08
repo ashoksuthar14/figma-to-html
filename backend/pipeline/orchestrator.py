@@ -17,15 +17,37 @@ from agents.position_generator import generate_deterministic_html_css
 from agents.verification import VerificationAgent
 from config import settings
 from pipeline.job_manager import job_manager
-from schemas.design_spec import DesignSpec
+from schemas.design_spec import DesignNode, DesignSpec
 from schemas.diff_report import DiffReport
-from schemas.job import JobResult, JobStatus
+from schemas.job import JobResult, JobStatus, PluginVerificationResult
 
 logger = logging.getLogger(__name__)
 
 
-def _build_design_context(spec: DesignSpec) -> str:
-    """Build a condensed design context string for the fixer agent."""
+def _log_scores(job_id: str, report: DiffReport, label: str = "") -> None:
+    """Compute and log plugin-facing scores from a DiffReport."""
+    scores = PluginVerificationResult.from_diff_report(report)
+    prefix = f"[job:{job_id}]"
+    if label:
+        prefix = f"{prefix} {label}"
+    logger.info(
+        "%s Scores: overall=%.1f, layout=%.1f, colors=%.1f, typography=%.1f, spacing=%.1f",
+        prefix,
+        scores.overall_score,
+        scores.layout_score,
+        scores.color_score,
+        scores.typography_score,
+        scores.spacing_score,
+    )
+
+
+def _build_design_context(spec: DesignSpec, section: str = "all") -> str:
+    """Build a condensed design context string for the fixer agent.
+
+    Args:
+        spec: The design specification.
+        section: Which metadata to include — "all", "typography", "spacing", or "assets".
+    """
     root = spec.root
     lines: list[str] = []
 
@@ -69,7 +91,134 @@ def _build_design_context(spec: DesignSpec) -> str:
                 f"w={child.bounds.width}, h={child.bounds.height}"
             )
 
+    # Per-node typography metadata
+    if section in ("all", "typography"):
+        typo_lines = _collect_typography_metadata(root)
+        if typo_lines:
+            lines.append("\n## Typography Metadata (exact Figma values per text node)")
+            lines.extend(typo_lines)
+
+    # Per-node spacing metadata
+    if section in ("all", "spacing"):
+        spacing_lines = _collect_spacing_metadata(root)
+        if spacing_lines:
+            lines.append("\n## Spacing Metadata (exact Figma values per container)")
+            lines.extend(spacing_lines)
+
+    # Asset/image nodes
+    if section in ("all", "assets"):
+        asset_lines = _collect_asset_metadata(root, spec)
+        if asset_lines:
+            lines.append("\n## Asset Metadata (images, vectors, icons)")
+            lines.extend(asset_lines)
+
     return "\n".join(lines)
+
+
+def _collect_typography_metadata(root: DesignNode, max_nodes: int = 60) -> list[str]:
+    """Walk the design tree and collect typography info for every TEXT node."""
+    lines: list[str] = []
+    stack = [root]
+    count = 0
+    while stack and count < max_nodes:
+        node = stack.pop()
+        if not node.visible:
+            continue
+        if node.type == "TEXT" and node.text and node.text.segments:
+            count += 1
+            segs = node.text.segments
+            seg = segs[0]
+            color_str = ""
+            if seg.fill and seg.fill.color:
+                color_str = seg.fill.color.to_css_rgba()
+            lh = seg.line_height
+            lh_str = f"{lh}px" if lh is not None else "auto"
+            ls = seg.letter_spacing
+            ls_str = f"{ls}px" if ls != 0 else "0"
+            text_preview = (node.text.characters or "")[:40].replace("\n", " ")
+            fs = seg.font_style if seg.font_style != "normal" else ""
+            fs_str = f", font-style={fs}" if fs else ""
+            lines.append(
+                f"  - \"{node.name}\" (id={node.id}): "
+                f"font-family=\"{seg.font_family}\", font-size={seg.font_size}px, "
+                f"font-weight={seg.font_weight}{fs_str}, line-height={lh_str}, "
+                f"letter-spacing={ls_str}, color={color_str}, "
+                f"align={node.text.text_align_horizontal}, "
+                f"text=\"{text_preview}\""
+            )
+            if len(segs) > 1:
+                for i, s in enumerate(segs[1:4], 2):
+                    s_color = s.fill.color.to_css_rgba() if s.fill and s.fill.color else ""
+                    s_lh = f"{s.line_height}px" if s.line_height is not None else "auto"
+                    s_fs = f", font-style={s.font_style}" if s.font_style != "normal" else ""
+                    lines.append(
+                        f"    segment {i}: font-size={s.font_size}px, "
+                        f"font-weight={s.font_weight}{s_fs}, line-height={s_lh}, "
+                        f"color={s_color}"
+                    )
+        stack.extend(reversed(node.children))
+    return lines
+
+
+def _collect_spacing_metadata(root: DesignNode, max_nodes: int = 60) -> list[str]:
+    """Walk the design tree and collect spacing info for containers with auto-layout or padding."""
+    lines: list[str] = []
+    stack = [(root, None)]
+    count = 0
+    while stack and count < max_nodes:
+        node, parent = stack.pop()
+        if not node.visible:
+            continue
+        has_layout = node.layout.mode != "NONE"
+        has_padding = any(
+            v > 0 for v in (
+                node.layout.padding_top, node.layout.padding_right,
+                node.layout.padding_bottom, node.layout.padding_left,
+            )
+        )
+        if (has_layout or has_padding) and node.children:
+            count += 1
+            parts = [f"  - \"{node.name}\" (id={node.id}):"]
+            if has_layout:
+                parts.append(f"layout={node.layout.mode}")
+                if node.layout.item_spacing:
+                    parts.append(f"gap={node.layout.item_spacing}px")
+                parts.append(f"primary-align={node.layout.primary_axis_align}")
+                parts.append(f"counter-align={node.layout.counter_axis_align}")
+            if has_padding:
+                parts.append(
+                    f"padding={node.layout.padding_top}/{node.layout.padding_right}/"
+                    f"{node.layout.padding_bottom}/{node.layout.padding_left}"
+                )
+            parts.append(
+                f"bounds=({node.bounds.x}, {node.bounds.y}, "
+                f"{node.bounds.width}x{node.bounds.height})"
+            )
+            lines.append(" ".join(parts))
+        for child in reversed(node.children):
+            stack.append((child, node))
+    return lines
+
+
+def _collect_asset_metadata(root: DesignNode, spec: DesignSpec, max_nodes: int = 40) -> list[str]:
+    """Collect metadata for image/vector asset nodes."""
+    asset_node_ids = {a.node_id for a in spec.assets}
+    lines: list[str] = []
+    stack = [root]
+    count = 0
+    while stack and count < max_nodes:
+        node = stack.pop()
+        if not node.visible:
+            continue
+        if node.id in asset_node_ids or node.type in ("VECTOR", "LINE", "STAR", "POLYGON"):
+            count += 1
+            lines.append(
+                f"  - \"{node.name}\" (id={node.id}, type={node.type}): "
+                f"bounds=({node.bounds.x}, {node.bounds.y}, "
+                f"{node.bounds.width}x{node.bounds.height})"
+            )
+        stack.extend(reversed(node.children))
+    return lines
 
 
 async def run_pipeline(
@@ -236,7 +385,7 @@ async def run_pipeline(
         await job_manager.update_status(
             job_id, JobStatus.VERIFYING,
             "Running visual verification",
-            progress=65,
+            progress=55,
             step="Running visual verification",
         )
 
@@ -248,6 +397,11 @@ async def run_pipeline(
         best_ssim = 0.0
         best_mismatch = 100.0
         iterations_used = 0
+
+        best_typo_html = html_content
+        best_typo_css = css_content
+        best_typo_report: Optional[DiffReport] = None
+        best_typo_score = 0.0
 
         stage_start = time.monotonic()
         if figma_screenshot:
@@ -261,175 +415,220 @@ async def run_pipeline(
             best_report = report
             best_ssim = report.ssim_score
             best_mismatch = report.pixel_mismatch_percent
+
+            init_scores = PluginVerificationResult.from_diff_report(report)
+            best_typo_report = report
+            best_typo_score = init_scores.typography_score
+            best_typo_rendered: Optional[bytes] = None
+
             logger.info("[job:%s] VERIFICATION completed in %.2fs (SSIM=%.4f, mismatch=%.2f%%, passed=%s)",
                          job_id, time.monotonic() - stage_start, report.ssim_score,
                          report.pixel_mismatch_percent, report.passed)
+            _log_scores(job_id, report, "Initial verification")
 
-            # Load rendered screenshot from verification for fixer's vision input
             rendered_screenshot_bytes: Optional[bytes] = None
             best_rendered_bytes: Optional[bytes] = None
             if report.rendered_screenshot_path:
                 try:
                     rendered_screenshot_bytes = Path(report.rendered_screenshot_path).read_bytes()
                     best_rendered_bytes = rendered_screenshot_bytes
+                    best_typo_rendered = rendered_screenshot_bytes
                 except Exception as e:
                     logger.warning("[job:%s] Could not load rendered screenshot: %s", job_id, e)
 
-            # === Stage 5: Fix Loop ===
+            # Enable HTML fixes when pixel mismatch is severe
+            if report.pixel_mismatch_percent > 20.0:
+                allow_html_fixes = True
+                logger.info(
+                    "[job:%s] High pixel mismatch (%.1f%%) — enabling HTML fixes in fixer",
+                    job_id, report.pixel_mismatch_percent,
+                )
+
+            # === Stage 5: Multi-phase fix loop ===
             if not report.passed:
                 fixer_agent = _setup_agent(FixerAgent(job_id))
                 current_css = css_content
                 current_report = report
-                max_iters = settings.MAX_FIX_ITERATIONS
 
-                # Enable HTML fixes when pixel mismatch is severe
-                if report.pixel_mismatch_percent > 20.0:
-                    allow_html_fixes = True
-                    logger.info(
-                        "[job:%s] High pixel mismatch (%.1f%%) — enabling HTML fixes in fixer",
-                        job_id, report.pixel_mismatch_percent,
-                    )
+                fix_phases: list[tuple[str, int, str]] = [
+                    ("general", settings.MAX_GENERAL_FIX_ITERATIONS, "all"),
+                    ("typography", settings.MAX_SPECIALIZED_FIX_ITERATIONS + 1, "typography"),
+                    ("spacing", settings.MAX_SPECIALIZED_FIX_ITERATIONS, "spacing"),
+                    ("assets", settings.MAX_SPECIALIZED_FIX_ITERATIONS, "assets"),
+                ]
+                total_max_iters = sum(mi for _, mi, _ in fix_phases)
+                global_iter = 0
 
-                # Build condensed design context for the fixer
-                design_context = _build_design_context(design_spec)
+                for phase_mode, phase_max, context_section in fix_phases:
+                    if current_report.passed:
+                        break
 
-                consecutive_failures = 0
-                for iteration in range(1, max_iters + 1):
-                    iterations_used = iteration
-                    fix_progress = 75 + int(15 * iteration / max_iters)
-                    await job_manager.update_status(
-                        job_id, JobStatus.PROCESSING,
-                        f"Fix iteration {iteration}/{max_iters}",
-                        progress=fix_progress,
-                        step=f"Fix iteration {iteration}/{max_iters}",
-                    )
+                    if phase_mode == "typography" and best_typo_report is not None:
+                        cur_typo = PluginVerificationResult.from_diff_report(
+                            current_report
+                        ).typography_score
+                        if best_typo_score > cur_typo:
+                            logger.info(
+                                "[job:%s] Switching to best-typography state for typography phase "
+                                "(typo %.1f > current %.1f)",
+                                job_id, best_typo_score, cur_typo,
+                            )
+                            current_css = best_typo_css
+                            html_content = best_typo_html
+                            current_report = best_typo_report
+                            if best_typo_rendered is not None:
+                                rendered_screenshot_bytes = best_typo_rendered
 
-                    # Apply fix — pass both screenshots for vision-based comparison
-                    try:
-                        fix_result = await fixer_agent.execute(
-                            html_content=html_content,
-                            css_content=current_css,
-                            diff_report=current_report,
-                            iteration=iteration,
-                            design_context=design_context,
-                            allow_html_fixes=allow_html_fixes,
-                            figma_screenshot=figma_screenshot,
-                            rendered_screenshot=rendered_screenshot_bytes,
+                    design_context = _build_design_context(design_spec, section=context_section)
+                    consecutive_failures = 0
+
+                    for phase_iter in range(1, phase_max + 1):
+                        global_iter += 1
+                        iterations_used = global_iter
+                        fix_progress = 60 + int(30 * global_iter / total_max_iters)
+                        phase_label = f"{phase_mode} fix {phase_iter}/{phase_max}"
+                        await job_manager.update_status(
+                            job_id, JobStatus.PROCESSING,
+                            phase_label,
+                            progress=fix_progress,
+                            step=phase_label,
                         )
-                    except Exception as e:
-                        logger.warning(
-                            "[job:%s] Fixer iteration %d failed (%s), keeping best CSS so far",
-                            job_id, iteration, e,
-                        )
-                        await job_manager.send_progress(
-                            job_id,
-                            f"Fix iteration {iteration} skipped (API error), continuing with best result",
-                        )
-                        consecutive_failures += 1
-                        if consecutive_failures >= 3:
-                            logger.info("[job:%s] Breaking fix loop after %d consecutive failures",
-                                        job_id, consecutive_failures)
-                            break
-                        continue
 
-                    fixed_css = fix_result["css"]
-                    fixed_html = fix_result.get("html")
-
-                    # Use updated HTML if fixer provided it
-                    verify_html = fixed_html if fixed_html else html_content
-
-                    # Re-verify
-                    new_report = await verification_agent.execute(
-                        design_spec=design_spec,
-                        html_content=verify_html,
-                        css_content=fixed_css,
-                        figma_screenshot=figma_screenshot,
-                    )
-
-                    # Load the new rendered screenshot for next iteration's fixer
-                    if new_report.rendered_screenshot_path:
                         try:
-                            rendered_screenshot_bytes = Path(new_report.rendered_screenshot_path).read_bytes()
+                            fix_result = await fixer_agent.execute(
+                                html_content=html_content,
+                                css_content=current_css,
+                                diff_report=current_report,
+                                iteration=global_iter,
+                                design_context=design_context,
+                                allow_html_fixes=allow_html_fixes and phase_mode == "general",
+                                figma_screenshot=figma_screenshot,
+                                rendered_screenshot=rendered_screenshot_bytes,
+                                mode=phase_mode,
+                            )
                         except Exception as e:
-                            logger.warning("[job:%s] Could not load rendered screenshot after iter %d: %s",
-                                           job_id, iteration, e)
+                            logger.warning(
+                                "[job:%s] %s fix iter %d failed (%s), keeping best CSS",
+                                job_id, phase_mode, phase_iter, e,
+                            )
+                            await job_manager.send_progress(
+                                job_id,
+                                f"{phase_label} skipped (API error), continuing",
+                            )
+                            consecutive_failures += 1
+                            if consecutive_failures >= 2:
+                                break
+                            continue
 
-                    # Accept if net improvement with small tolerance (avoid rejecting good fixes)
-                    ssim_improved = new_report.ssim_score > current_report.ssim_score - 0.005
-                    mismatch_improved = (
-                        new_report.pixel_mismatch_percent <= current_report.pixel_mismatch_percent + 0.5
-                    )
-                    at_least_one_better = (
-                        new_report.ssim_score > current_report.ssim_score
-                        or new_report.pixel_mismatch_percent < current_report.pixel_mismatch_percent
-                    )
-                    improved = ssim_improved and mismatch_improved and at_least_one_better
-                    logger.info("[job:%s] Fix iteration %d: improved=%s, SSIM=%.4f, mismatch=%.2f%%",
-                                 job_id, iteration, improved, new_report.ssim_score,
-                                 new_report.pixel_mismatch_percent)
+                        fixed_css = fix_result["css"]
+                        fixed_html = fix_result.get("html")
+                        verify_html = fixed_html if fixed_html else html_content
 
-                    if improved:
-                        consecutive_failures = 0
-                        current_css = fixed_css
-                        current_report = new_report
-                        if fixed_html:
-                            html_content = fixed_html
-                            logger.info("[job:%s] HTML updated by fixer in iteration %d",
-                                        job_id, iteration)
+                        new_report = await verification_agent.execute(
+                            design_spec=design_spec,
+                            html_content=verify_html,
+                            css_content=fixed_css,
+                            figma_screenshot=figma_screenshot,
+                        )
 
-                        # Track best result
-                        if (
-                            new_report.ssim_score > best_ssim
-                            or new_report.pixel_mismatch_percent < best_mismatch
-                        ):
-                            best_html = html_content
-                            best_css = fixed_css
-                            best_report = new_report
-                            best_ssim = new_report.ssim_score
-                            best_mismatch = new_report.pixel_mismatch_percent
+                        if new_report.rendered_screenshot_path:
+                            try:
+                                rendered_screenshot_bytes = Path(new_report.rendered_screenshot_path).read_bytes()
+                            except Exception as e:
+                                logger.warning("[job:%s] Could not load rendered screenshot: %s", job_id, e)
+
+                        ssim_improved = new_report.ssim_score > current_report.ssim_score - 0.005
+                        mismatch_improved = (
+                            new_report.pixel_mismatch_percent <= current_report.pixel_mismatch_percent + 0.5
+                        )
+                        at_least_one_better = (
+                            new_report.ssim_score > current_report.ssim_score
+                            or new_report.pixel_mismatch_percent < current_report.pixel_mismatch_percent
+                        )
+                        improved = ssim_improved and mismatch_improved and at_least_one_better
+
+                        iter_scores = PluginVerificationResult.from_diff_report(new_report)
+
+                        if improved and phase_mode != "typography":
+                            cur_scores = PluginVerificationResult.from_diff_report(current_report)
+                            if iter_scores.typography_score < cur_scores.typography_score - 2.0:
+                                logger.info(
+                                    "[job:%s] %s iter %d: rejecting — typography would drop %.1f -> %.1f",
+                                    job_id, phase_mode, phase_iter,
+                                    cur_scores.typography_score, iter_scores.typography_score,
+                                )
+                                improved = False
+
+                        logger.info("[job:%s] %s iter %d: improved=%s, SSIM=%.4f, mismatch=%.2f%%",
+                                     job_id, phase_mode, phase_iter, improved,
+                                     new_report.ssim_score, new_report.pixel_mismatch_percent)
+                        _log_scores(job_id, new_report, f"{phase_mode} iter {phase_iter}")
+
+                        if iter_scores.typography_score > best_typo_score:
+                            best_typo_score = iter_scores.typography_score
+                            best_typo_css = fixed_css
+                            best_typo_html = fixed_html if fixed_html else html_content
+                            best_typo_report = new_report
                             if rendered_screenshot_bytes is not None:
-                                best_rendered_bytes = rendered_screenshot_bytes
+                                best_typo_rendered = rendered_screenshot_bytes
 
-                        await job_manager.send_progress(
-                            job_id,
-                            f"Fix iteration {iteration} improved: "
-                            f"SSIM {new_report.ssim_score:.4f}, "
-                            f"mismatch {new_report.pixel_mismatch_percent:.2f}%",
-                        )
+                        if improved:
+                            consecutive_failures = 0
+                            current_css = fixed_css
+                            current_report = new_report
+                            if fixed_html:
+                                html_content = fixed_html
 
-                        # Check if we've reached passing threshold
-                        if new_report.passed:
+                            if (
+                                new_report.ssim_score > best_ssim
+                                or new_report.pixel_mismatch_percent < best_mismatch
+                            ):
+                                best_html = html_content
+                                best_css = fixed_css
+                                best_report = new_report
+                                best_ssim = new_report.ssim_score
+                                best_mismatch = new_report.pixel_mismatch_percent
+                                if rendered_screenshot_bytes is not None:
+                                    best_rendered_bytes = rendered_screenshot_bytes
+
                             await job_manager.send_progress(
                                 job_id,
-                                f"Visual verification passed after {iteration} fix(es)!",
+                                f"{phase_label} improved: SSIM {new_report.ssim_score:.4f}, "
+                                f"mismatch {new_report.pixel_mismatch_percent:.2f}%",
                             )
-                            break
-                    else:
-                        # Rollback - mismatch increased or stayed the same
-                        consecutive_failures += 1
-                        await job_manager.send_progress(
-                            job_id,
-                            f"Fix iteration {iteration} did not improve, rolling back",
-                        )
-                        # Reload the best rendered screenshot for next iteration (use in-memory best, not overwritten file)
-                        if best_rendered_bytes is not None:
-                            rendered_screenshot_bytes = best_rendered_bytes
-                        # Early exit after 3 consecutive regressions to save time and API cost
-                        if consecutive_failures >= 3:
+
+                            if new_report.passed:
+                                await job_manager.send_progress(
+                                    job_id,
+                                    f"Verification passed after {global_iter} total fix(es)!",
+                                )
+                                break
+                        else:
+                            consecutive_failures += 1
                             await job_manager.send_progress(
                                 job_id,
-                                "Stopping fix loop after 3 consecutive non-improvements.",
+                                f"{phase_label} did not improve, rolling back",
                             )
-                            logger.info("[job:%s] Early exit: 3 consecutive fix iterations did not improve",
-                                        job_id)
-                            break
+                            if best_rendered_bytes is not None:
+                                rendered_screenshot_bytes = best_rendered_bytes
+                            if consecutive_failures >= 2:
+                                logger.info("[job:%s] Moving past %s phase after %d non-improvements",
+                                            job_id, phase_mode, consecutive_failures)
+                                break
+
+                    # Sync current state with best before entering next phase
+                    current_css = best_css
+                    html_content = best_html
+                    current_report = best_report or current_report
+                    if best_rendered_bytes is not None:
+                        rendered_screenshot_bytes = best_rendered_bytes
+
         else:
             await job_manager.send_progress(
                 job_id,
                 "Visual verification skipped (no reference screenshot).",
             )
 
-        # Use best results
         html_content = best_html
         css_content = best_css
 
@@ -473,8 +672,18 @@ async def run_pipeline(
                 f'<link rel="preconnect" href="https://fonts.googleapis.com">\n'
                 f'    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
                 f'    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
-                + "&".join(f"family={f.replace(' ', '+')}:wght@100;200;300;400;500;600;700;800;900" for f in fonts if f)
-                + f'&display=swap">'
+                + "&".join(
+                    "family={fam}:ital,wght@{axes}".format(
+                        fam=f.replace(" ", "+"),
+                        axes=";".join(
+                            "{ital},{w}".format(ital=ital, w=w)
+                            for ital in (0, 1)
+                            for w in (100, 200, 300, 400, 500, 600, 700, 800, 900)
+                        ),
+                    )
+                    for f in fonts if f
+                )
+                + '&display=swap">'
             )
         else:
             fonts_link = ""
@@ -548,6 +757,8 @@ async def run_pipeline(
             "[job:%s] Pipeline complete in %.2fs: SSIM=%.4f, mismatch=%.2f%%, iterations=%d",
             job_id, time.monotonic() - pipeline_start, best_ssim, best_mismatch, iterations_used,
         )
+        if best_report:
+            _log_scores(job_id, best_report, "FINAL")
 
     except Exception as e:
         logger.exception("[job:%s] Pipeline failed after %.2fs: %s",

@@ -1,4 +1,4 @@
-import type { Job, MicroFixResponse } from "@/types/editor";
+import type { Job, MicroFixResponse, FigmaNodeProperties } from "@/types/editor";
 
 const API_URL =
   typeof window !== "undefined"
@@ -71,6 +71,17 @@ export async function microFix(
 
 export async function deleteJob(jobId: string): Promise<void> {
   await apiFetch(`/jobs/${jobId}`, { method: "DELETE" });
+}
+
+export async function fetchDesignSpecNodes(
+  jobId: string,
+  nodeIds: string[]
+): Promise<Record<string, FigmaNodeProperties>> {
+  const ids = nodeIds.join(",");
+  const data = await apiFetch<{ nodes: Record<string, FigmaNodeProperties> }>(
+    `/jobs/${jobId}/design-spec/nodes?ids=${encodeURIComponent(ids)}`
+  );
+  return data.nodes;
 }
 
 export function getAssetBaseUrl(jobId: string): string {

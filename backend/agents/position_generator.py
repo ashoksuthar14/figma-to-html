@@ -7,7 +7,7 @@ import hashlib
 import logging
 import re
 
-from agents.code_generator import _map_font
+from agents.code_generator import _is_condensed_source, _map_font
 from schemas.design_spec import (
     Bounds,
     DesignNode,
@@ -19,6 +19,25 @@ from schemas.design_spec import (
 from schemas.layout_plan import LayoutPlan, LayoutStrategy
 
 logger = logging.getLogger(__name__)
+
+_CONDENSED_SUBSTITUTES = frozenset({
+    "barlow condensed", "roboto condensed",
+})
+
+_FONT_STRETCH_MAP: dict[str, str] = {
+    "alternate gothic std": "83%",
+    "alternate gothic": "83%",
+    "alternate gothic atf": "83%",
+    "alternate gothic no2": "83%",
+    "alternate gothic no3": "83%",
+    "alternate gothic condensed atf": "75%",
+    "alternate gothic condensed": "75%",
+}
+
+_FONT_STRETCH_LETTER_SPACING: dict[str, str] = {
+    "83%": "-0.3px",
+    "75%": "-0.5px",
+}
 
 # Known serif and monospace font families for correct generic fallback (design-agnostic).
 _SERIF_FONTS = frozenset(
@@ -237,32 +256,67 @@ def _generic_font_family(font_name: str) -> str:
     return "sans-serif"
 
 
+_TEXT_TRANSFORM_MAP: dict[str, str] = {
+    "UPPER": "uppercase",
+    "LOWER": "lowercase",
+    "TITLE": "capitalize",
+}
+
+
 def _text_segment_css(seg: TextSegment) -> dict[str, str]:
     """Build CSS property dict for a TextSegment."""
     css: dict[str, str] = {}
-    mapped_font = _map_font(seg.font_family)
+    original_font = seg.font_family or ""
+    mapped_font = _map_font(original_font)
     generic = _generic_font_family(mapped_font)
     css["font-family"] = f"'{mapped_font}', {generic}"
     css["font-weight"] = str(seg.font_weight)
+    if seg.font_style and seg.font_style == "italic":
+        css["font-style"] = "italic"
     css["font-size"] = _px(seg.font_size)
+
+    stretch_pct = _FONT_STRETCH_MAP.get(original_font.strip().lower())
+    is_condensed = _is_condensed_source(original_font)
+    is_substituted = mapped_font != original_font
+
+    if stretch_pct and is_substituted:
+        css["font-stretch"] = stretch_pct
+    elif (
+        is_condensed
+        and is_substituted
+        and mapped_font.lower() not in _CONDENSED_SUBSTITUTES
+    ):
+        css["font-stretch"] = "condensed"
+
     if seg.line_height is not None:
-        # Floor line-height at font-size to prevent glyph clipping when Figma reports smaller
-        if seg.line_height < seg.font_size:
-            css["line-height"] = "normal"
-        else:
-            css["line-height"] = _px(seg.line_height)
+        lh_unit = getattr(seg, "line_height_unit", "AUTO")
+        if lh_unit == "PERCENT":
+            css["line-height"] = str(round(seg.line_height, 3))
+        elif lh_unit == "PIXELS":
+            if seg.line_height >= seg.font_size:
+                css["line-height"] = _px(seg.line_height)
+        # AUTO: omit — let browser use its default
     if seg.letter_spacing and seg.letter_spacing != 0:
         unit = getattr(seg, "letter_spacing_unit", "PIXELS")
         if unit == "PERCENT":
-            css["letter-spacing"] = f"{round(seg.font_size * seg.letter_spacing / 100, 2)}px"
+            computed = round(seg.font_size * seg.letter_spacing / 100, 3)
+            css["letter-spacing"] = f"{computed}px"
         else:
             css["letter-spacing"] = _px(seg.letter_spacing)
+    elif stretch_pct and is_substituted:
+        css["letter-spacing"] = _FONT_STRETCH_LETTER_SPACING.get(
+            stretch_pct, "-0.3px"
+        )
+    elif is_condensed and is_substituted:
+        css["letter-spacing"] = "-0.4px"
     if seg.fill and seg.fill.color:
         css["color"] = seg.fill.color.to_css_rgba()
     if seg.text_decoration and seg.text_decoration != "NONE":
         css["text-decoration"] = seg.text_decoration.lower().replace("_", "-")
     if seg.text_transform and seg.text_transform not in ("NONE", "ORIGINAL"):
-        css["text-transform"] = seg.text_transform.lower()
+        css["text-transform"] = _TEXT_TRANSFORM_MAP.get(
+            seg.text_transform, seg.text_transform.lower()
+        )
     return css
 
 
@@ -471,14 +525,11 @@ def _generate_node(
 
     # Text auto-resize mode from Figma (NONE, WIDTH_AND_HEIGHT, HEIGHT, TRUNCATE)
     text_auto_resize = ""
+    width_buffer = 0
+    height_buffer = 0
     if is_text and node.text:
         text_auto_resize = getattr(node.text, "text_auto_resize", "NONE") or "NONE"
 
-        # Compute font-size-proportional buffers for cross-engine rendering
-        # differences. Browsers (Chrome, Firefox, Safari) render fonts with
-        # different metrics than Figma's engine, so bounding boxes from Figma
-        # are often too tight.  Scale buffer with both font size and character
-        # count — cumulative per-glyph differences add up for longer strings.
         max_font_size = 16.0
         if node.text.segments:
             max_font_size = max(seg.font_size for seg in node.text.segments)
@@ -489,12 +540,10 @@ def _generate_node(
             width_buffer = max(8, round(max_font_size * 0.15 * min(char_count, 6)))
         else:
             width_buffer = max(4, round(max_font_size * 0.08 * min(char_count, 10)))
-
-        # Height buffer: Figma bounding boxes can be tighter than the
-        # browser's glyph ascender.  A small buffer prevents the digit
-        # bottoms from being clipped by overflow-y:clip while staying
-        # within the gap before the next sibling element.
-        height_buffer = max(4, round(max_font_size * 0.15))
+        height_buffer = max(6, round(max_font_size * 0.2))
+        raw_chars = node.text.characters or ""
+        if "\n" in raw_chars or "\r" in raw_chars:
+            height_buffer += max(4, round(max_font_size * 0.1))
 
         if text_auto_resize in ("WIDTH_AND_HEIGHT", "NONE"):
             bw += width_buffer
@@ -502,6 +551,11 @@ def _generate_node(
             bw += max(2, width_buffer // 3)
         if text_auto_resize != "TRUNCATE":
             bh += height_buffer
+
+        if text_auto_resize == "NONE":
+            bw += 4
+        elif text_auto_resize == "HEIGHT":
+            bw += 2
 
     # Positioning: if parent is flex, children flow; otherwise absolute
     if parent is None:
@@ -542,6 +596,14 @@ def _generate_node(
             py = parent.bounds.y if parent else 0
             left = bx - px
             top = by - py
+
+            if is_text and parent is not None:
+                parent_clips = getattr(parent, "clip_content", False) or parent.style.overflow == "HIDDEN"
+                if parent_clips:
+                    available_w = parent.bounds.width - left
+                    if bw > available_w > 0:
+                        bw = available_w
+
             props.append("position: absolute")
             props.append(f"left: {_px(left)}")
             props.append(f"top: {_px(top)}")
@@ -600,7 +662,7 @@ def _generate_node(
             # slight cross-engine rendering differences (font widths, SVG
             # rounding) are not visually truncated.
             props.append("overflow: clip")
-            props.append("overflow-clip-margin: content-box 4px")
+            props.append("overflow-clip-margin: content-box 8px")
         elif node.style.overflow == "HIDDEN" or node.clip_content:
             props.append("overflow: hidden")
 
@@ -711,22 +773,22 @@ def _generate_node(
                 props.append("text-overflow: ellipsis")
                 props.append("white-space: nowrap")
         elif text_auto_resize == "NONE":
-            # Fixed text box: clip top/bottom only via clip-path so cross-
-            # engine font-width differences don't truncate characters.
-            # overflow:hidden is NOT used because it hard-clips horizontally.
-            props.append("clip-path: inset(0 -9999px 0 -9999px)")
+            # Fixed text box: bounded clip-path allows small horizontal
+            # overflow for cross-engine font-width differences without
+            # letting text bleed far into adjacent elements.
+            clip_h = max(8, width_buffer // 2)
+            props.append(f"clip-path: inset(-2px -{clip_h}px -2px -{clip_h}px)")
             if "\n" in text_content:
                 props.append("overflow-wrap: break-word")
                 props.append("white-space: pre-wrap")
             else:
                 props.append("white-space: nowrap")
         else:
-            # WIDTH_AND_HEIGHT or HEIGHT: Figma auto-sized this text box to
-            # fit its content.  Use clip-path to clip the top/bottom edges
-            # (preventing line-height from overlapping siblings) while leaving
-            # left/right unclipped so cross-engine font-width differences
-            # don't truncate visible characters (e.g. "100%" → "10").
-            props.append("clip-path: inset(0 -9999px 0 -9999px)")
+            # WIDTH_AND_HEIGHT or HEIGHT: bounded clip-path prevents
+            # line-height overlap with siblings while allowing small
+            # horizontal overflow for cross-engine font-width differences.
+            clip_h = max(8, width_buffer // 2)
+            props.append(f"clip-path: inset(-2px -{clip_h}px -2px -{clip_h}px)")
             if "\n" in text_content:
                 props.append("overflow-wrap: break-word")
                 props.append("white-space: pre-wrap")

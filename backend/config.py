@@ -24,6 +24,8 @@ class Settings(BaseSettings):
 
     # Pipeline tuning
     MAX_FIX_ITERATIONS: int = 5
+    MAX_GENERAL_FIX_ITERATIONS: int = 3
+    MAX_SPECIALIZED_FIX_ITERATIONS: int = 2
     PIXEL_MISMATCH_THRESHOLD: float = 15.0  # percent; relaxed for cross-engine text rendering
     SSIM_THRESHOLD: float = 0.70
 

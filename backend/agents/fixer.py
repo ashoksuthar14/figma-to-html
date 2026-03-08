@@ -185,7 +185,32 @@ def _get_root_selector_and_background(original_css: str) -> Optional[tuple[str, 
     return None
 
 
-def _merge_css_fixes(original_css: str, fix_css: str) -> str:
+_MODE_GUARDED_PROPS: dict[str, tuple[str, ...]] = {
+    "general": ("color", "font-family", "font-size", "line-height", "text-transform"),
+    "typography": ("color", "font-family", "line-height"),
+    "spacing": ("color", "font-family", "font-size", "line-height", "text-transform"),
+    "assets": ("color", "font-family", "font-size", "line-height", "text-transform"),
+}
+
+
+_LETTER_SPACING_RE = re.compile(
+    r"(letter-spacing:\s*)(-?\d+(?:\.\d+)?)(px)",
+)
+
+
+def _sanitize_letter_spacing(css: str) -> str:
+    """Clamp letter-spacing values to >= -1px to prevent character overlap."""
+
+    def _clamp(m: re.Match) -> str:
+        val = float(m.group(2))
+        if val < -1.0:
+            return "{}{}{}".format(m.group(1), "-1", m.group(3))
+        return m.group(0)
+
+    return _LETTER_SPACING_RE.sub(_clamp, css)
+
+
+def _merge_css_fixes(original_css: str, fix_css: str, mode: str = "general") -> str:
     """Merge changed CSS properties from fixer into the original CSS.
 
     Uses PROPERTY-LEVEL merging: for each rule in fix_css, merges individual
@@ -199,6 +224,12 @@ def _merge_css_fixes(original_css: str, fix_css: str) -> str:
 
     After merging, the root container's background-color/background are
     restored from the original CSS so the fixer cannot change them (e.g. to black).
+
+    Args:
+        original_css: The original CSS to merge into.
+        fix_css: The CSS fixes to apply.
+        mode: Fixer mode — controls which properties are guarded from changes.
+
     Returns the merged CSS string.
     """
     if not fix_css or not fix_css.strip():
@@ -212,6 +243,7 @@ def _merge_css_fixes(original_css: str, fix_css: str) -> str:
         return original_css
 
     root_background = _get_root_selector_and_background(original_css)
+    guarded = _MODE_GUARDED_PROPS.get(mode, _MODE_GUARDED_PROPS["general"])
 
     merged_css = original_css
     appended_rules: list[str] = []
@@ -219,29 +251,26 @@ def _merge_css_fixes(original_css: str, fix_css: str) -> str:
     for selector, fix_rule in fix_rules.items():
         if selector in original_rules:
             original_rule = original_rules[selector]
-            # Parse properties from both rules
             orig_props = _parse_css_properties(original_rule)
             fix_props = _parse_css_properties(fix_rule)
-            # Merge: fix properties override originals, originals preserved
             merged_props = {**orig_props, **fix_props}
-            # Guard: preserve color, font-family, font-size — from Figma spec; fixer must not change them
-            for guarded in ("color", "font-family", "font-size"):
-                if guarded in orig_props and guarded in fix_props:
-                    merged_props[guarded] = orig_props[guarded]
-            # Guard: never let fixer change root container background
+            for prop in guarded:
+                if prop in orig_props and prop in fix_props:
+                    merged_props[prop] = orig_props[prop]
+            if "overflow" in orig_props and "overflow" in fix_props:
+                if orig_props["overflow"] == "clip" and fix_props["overflow"] == "visible":
+                    merged_props["overflow"] = orig_props["overflow"]
             if root_background and selector == root_background[0]:
                 for k, v in root_background[1].items():
                     merged_props[k] = v
             merged_rule = _rebuild_rule(selector, merged_props)
             merged_css = merged_css.replace(original_rule, merged_rule)
         else:
-            # New rule — append at end
             appended_rules.append(fix_rule)
 
     if appended_rules:
         merged_css = merged_css.rstrip() + "\n\n" + "\n\n".join(appended_rules) + "\n"
 
-    # If root was not in fix_rules, ensure merged still has original root background
     if root_background:
         root_sel, root_props = root_background
         if root_sel in original_rules and root_props:
@@ -256,8 +285,9 @@ def _merge_css_fixes(original_css: str, fix_css: str) -> str:
                 if changed:
                     merged_rule = _rebuild_rule(root_sel, merged_props)
                     merged_css = merged_css.replace(merged_rules[root_sel], merged_rule)
-    logger.info("CSS merge: %d rules patched (property-level), %d rules appended",
-                len(fix_rules) - len(appended_rules), len(appended_rules))
+    merged_css = _sanitize_letter_spacing(merged_css)
+    logger.info("CSS merge (%s): %d rules patched (property-level), %d rules appended",
+                mode, len(fix_rules) - len(appended_rules), len(appended_rules))
     return merged_css
 
 
@@ -278,6 +308,7 @@ class FixerAgent(BaseAgent):
         allow_html_fixes: bool = False,
         figma_screenshot: Optional[bytes] = None,
         rendered_screenshot: Optional[bytes] = None,
+        mode: str = "general",
     ) -> dict[str, str]:
         """Apply targeted CSS fixes by visually comparing Figma vs rendered output.
 
@@ -290,25 +321,32 @@ class FixerAgent(BaseAgent):
             allow_html_fixes: If True, allow HTML modifications.
             figma_screenshot: PNG bytes of the Figma design (reference).
             rendered_screenshot: PNG bytes of the current rendered HTML.
+            mode: Fix mode — "general", "typography", "spacing", or "assets".
 
         Returns:
             Dict with 'css' key (always) and 'html' key (when HTML was fixed).
         """
         agent_start = time.monotonic()
-        logger.info("[job:%s] Fixer iteration %d started (vision=%s, allow_html=%s)",
-                     self.job_id, iteration,
+        logger.info("[job:%s] Fixer iteration %d started (mode=%s, vision=%s, allow_html=%s)",
+                     self.job_id, iteration, mode,
                      figma_screenshot is not None and rendered_screenshot is not None,
                      allow_html_fixes)
         await self.report_progress(
-            f"Starting fix iteration {iteration}",
-            {"iteration": iteration, "allow_html_fixes": allow_html_fixes},
+            f"Starting {mode} fix iteration {iteration}",
+            {"iteration": iteration, "mode": mode, "allow_html_fixes": allow_html_fixes},
         )
 
-        # Load the fixer prompt template
-        prompt_path = PROMPTS_DIR / "fixer.txt"
+        _PROMPT_FILE: dict[str, str] = {
+            "general": "fixer.txt",
+            "typography": "fixer_typography.txt",
+            "spacing": "fixer_spacing.txt",
+            "assets": "fixer_assets.txt",
+        }
+        prompt_filename = _PROMPT_FILE.get(mode, "fixer.txt")
+        prompt_path = PROMPTS_DIR / prompt_filename
         system_prompt = prompt_path.read_text(encoding="utf-8")
 
-        if allow_html_fixes:
+        if allow_html_fixes and mode == "general":
             # Remove the CSS-only restriction so the model may return HTML + CSS
             system_prompt = system_prompt.replace(
                 "1. **CSS-only fixes**: You must ONLY modify CSS. Do not suggest HTML changes.\n2.",
@@ -387,8 +425,7 @@ class FixerAgent(BaseAgent):
             await self.report_progress("Fix extraction failed, keeping original CSS")
             return {"css": css_content}
 
-        # Merge at property level — preserves existing layout properties
-        merged_css = _merge_css_fixes(css_content, fix_css)
+        merged_css = _merge_css_fixes(css_content, fix_css, mode=mode)
         result["css"] = merged_css
 
         # Record fix history
@@ -403,12 +440,13 @@ class FixerAgent(BaseAgent):
             "rules_changed": fix_rule_count,
         })
 
-        logger.info("[job:%s] Fixer iteration %d complete in %.2fs (%d CSS rules changed)",
-                     self.job_id, iteration, time.monotonic() - agent_start, fix_rule_count)
+        logger.info("[job:%s] Fixer %s iteration %d complete in %.2fs (%d CSS rules changed)",
+                     self.job_id, mode, iteration, time.monotonic() - agent_start, fix_rule_count)
         await self.report_progress(
-            f"Fix iteration {iteration} complete ({fix_rule_count} CSS rules changed)",
+            f"{mode.capitalize()} fix iteration {iteration} complete ({fix_rule_count} CSS rules changed)",
             {
                 "iteration": iteration,
+                "mode": mode,
                 "css_length": len(merged_css),
                 "changes_made": merged_css != css_content,
                 "rules_changed": fix_rule_count,

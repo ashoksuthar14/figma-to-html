@@ -233,6 +233,44 @@ export function applyPositionDelta(
   return { html: currentHtml, css: currentCss };
 }
 
+/**
+ * Update a typography CSS property (font-size, line-height, letter-spacing) for a node.
+ * Works like updateSpacing: prefers CSS class rule, falls back to inline style.
+ */
+export function updateTypographyProperty(
+  html: string,
+  css: string,
+  nodeId: string,
+  property: string,
+  value: string
+): { html: string; css: string } {
+  return updateSpacing(html, css, nodeId, property, value);
+}
+
+/**
+ * Update the `gap` property on the parent container of a node.
+ * Finds the parent element by walking up from the target node in the HTML,
+ * then applies the gap change via CSS class or inline style.
+ */
+export function updateParentGap(
+  html: string,
+  css: string,
+  nodeId: string,
+  gapValue: string
+): { html: string; css: string } {
+  const $ = cheerio.load(html);
+  const el = $(`[data-node-id="${nodeId}"]`);
+  if (el.length === 0) return { html, css };
+
+  const parent = el.parent().closest("[data-node-id]");
+  if (parent.length === 0) return { html, css };
+
+  const parentNodeId = parent.attr("data-node-id") ?? "";
+  if (!parentNodeId) return { html, css };
+
+  return updateSpacing(html, css, parentNodeId, "gap", gapValue);
+}
+
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

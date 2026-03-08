@@ -38,7 +38,7 @@ _GOOGLE_FONTS_COMMON: set[str] = {
     "Gelasio", "Gloria Hallelujah", "Gothic A1", "Great Vibes", "Heebo",
     "Hind", "IBM Plex Sans", "IBM Plex Serif", "Inconsolata", "Inter",
     "Josefin Sans", "Josefin Slab", "Jost", "Kanit", "Karla", "Kalam",
-    "Lato", "Lexend", "Libre Baskerville", "Libre Franklin", "Lilita One",
+    "Lato", "League Gothic", "Lexend", "Libre Baskerville", "Libre Franklin", "Lilita One",
     "Lobster", "Lora", "Lusitana", "Merriweather", "Merriweather Sans",
     "Montserrat", "Mukta", "Mulish", "Nanum Gothic", "Neuton", "Noto Sans",
     "Noto Serif", "Nunito", "Nunito Sans", "Open Sans", "Oswald", "Outfit",
@@ -53,17 +53,35 @@ _GOOGLE_FONTS_COMMON: set[str] = {
     "Zilla Slab",
 }
 
+# System fonts available on virtually all platforms (no Google Fonts needed).
+# Lowercased for case-insensitive lookup.
+_SYSTEM_FONTS: dict[str, str] = {
+    "arial": "Arial",
+    "helvetica": "Helvetica",
+    "helvetica neue": "Helvetica Neue",
+    "verdana": "Verdana",
+    "tahoma": "Tahoma",
+    "trebuchet ms": "Trebuchet MS",
+    "georgia": "Georgia",
+    "times new roman": "Times New Roman",
+    "times": "Times New Roman",
+    "courier new": "Courier New",
+    "courier": "Courier New",
+    "impact": "Impact",
+    "segoe ui": "Segoe UI",
+}
+
 # Mapping from unavailable Figma fonts → best available Google Fonts alternative.
 # Keys are lowercased for case-insensitive matching.
 _FONT_FALLBACK_MAP: dict[str, str] = {
-    # Condensed / Gothic fonts
-    "alternate gothic std": "Oswald",
-    "alternate gothic": "Oswald",
-    "alternate gothic no2": "Oswald",
-    "alternate gothic no3": "Oswald",
-    "alternate gothic atf": "Oswald",
-    "alternate gothic condensed atf": "Barlow Condensed",
-    "alternate gothic condensed": "Barlow Condensed",
+    # Condensed / Gothic fonts — League Gothic is a direct revival of Alternate Gothic #1
+    "alternate gothic std": "League Gothic",
+    "alternate gothic": "League Gothic",
+    "alternate gothic no2": "League Gothic",
+    "alternate gothic no3": "League Gothic",
+    "alternate gothic atf": "League Gothic",
+    "alternate gothic condensed atf": "League Gothic",
+    "alternate gothic condensed": "League Gothic",
     "franklin gothic": "Libre Franklin",
     "franklin gothic medium": "Libre Franklin",
     "franklin gothic book": "Libre Franklin",
@@ -72,16 +90,12 @@ _FONT_FALLBACK_MAP: dict[str, str] = {
     "trade gothic next": "Barlow Condensed",
     "news gothic": "Roboto Condensed",
     "news gothic std": "Roboto Condensed",
-    # Humanist sans-serif
-    "helvetica": "Inter",
-    "helvetica neue": "Inter",
+    # Humanist sans-serif (non-system fonts only)
     "helvetica now": "Inter",
-    "arial": "Inter",
     "sf pro": "Inter",
     "sf pro display": "Inter",
     "sf pro text": "Inter",
     "san francisco": "Inter",
-    "segoe ui": "Inter",
     # Geometric sans-serif
     "futura": "Jost",
     "futura pt": "Jost",
@@ -94,10 +108,7 @@ _FONT_FALLBACK_MAP: dict[str, str] = {
     "gotham rounded": "Nunito",
     "brandon grotesque": "Raleway",
     "museo sans": "Mulish",
-    # Serif fonts
-    "georgia": "Lora",
-    "times": "Source Serif Pro",
-    "times new roman": "Source Serif Pro",
+    # Serif fonts (non-system fonts only)
     "garamond": "EB Garamond",
     "adobe garamond": "EB Garamond",
     "minion": "Source Serif Pro",
@@ -107,10 +118,7 @@ _FONT_FALLBACK_MAP: dict[str, str] = {
     "palatino": "Spectral",
     # Slab serif
     "rockwell": "Roboto Slab",
-    "courier new": "Roboto Mono",
-    "courier": "Roboto Mono",
     # Display fonts
-    "impact": "Anton",
     "gill sans": "Raleway",
     "gill sans mt": "Raleway",
     "din": "Teko",
@@ -120,21 +128,39 @@ _FONT_FALLBACK_MAP: dict[str, str] = {
 }
 
 
-def _map_font(font_family: str) -> str:
-    """Map a font family to a Google Fonts-available alternative if needed.
+_CONDENSED_KEYWORDS = frozenset({
+    "condensed", "gothic", "narrow", "compressed", "compact",
+})
 
-    Returns the original font if it's available on Google Fonts,
-    or the best fallback alternative otherwise.
+
+def _is_condensed_source(font_family: str) -> bool:
+    """Return True if the original Figma font is a condensed / narrow family."""
+    if not font_family:
+        return False
+    lower = font_family.lower()
+    return any(kw in lower for kw in _CONDENSED_KEYWORDS)
+
+
+def _map_font(font_family: str) -> str:
+    """Map a font family to the best available web/system font.
+
+    Prefers system fonts (Arial, Georgia, etc.) when available for pixel-perfect
+    fidelity, then Google Fonts, then fallback alternatives.
     """
     if not font_family:
         return "Inter"
 
-    # Check if already available
+    lower = font_family.lower().strip()
+
+    # Prefer system fonts — they match Figma's metrics more closely
+    if lower in _SYSTEM_FONTS:
+        return _SYSTEM_FONTS[lower]
+
+    # Check if already available on Google Fonts
     if font_family in _GOOGLE_FONTS_COMMON:
         return font_family
 
     # Check fallback map (case-insensitive)
-    lower = font_family.lower().strip()
     if lower in _FONT_FALLBACK_MAP:
         return _FONT_FALLBACK_MAP[lower]
 
@@ -142,6 +168,8 @@ def _map_font(font_family: str) -> str:
     for suffix in (" std", " pro", " mt", " lt", " book", " medium",
                    " bold", " regular", " display", " text"):
         base = lower.replace(suffix, "").strip()
+        if base in _SYSTEM_FONTS:
+            return _SYSTEM_FONTS[base]
         if base in _FONT_FALLBACK_MAP:
             return _FONT_FALLBACK_MAP[base]
 
@@ -463,7 +491,7 @@ def _is_css_renderable_asset(
 
 
 def _build_font_list(spec: DesignSpec) -> list[str]:
-    """Extract the list of fonts used in the design, mapped to web-available alternatives."""
+    """Extract Google Fonts needed for the design (excludes system fonts)."""
     raw_fonts = set(spec.fonts_used)
 
     def _collect_fonts(node: DesignNode) -> None:
@@ -475,11 +503,13 @@ def _build_font_list(spec: DesignSpec) -> list[str]:
 
     _collect_fonts(spec.root)
 
-    # Map each font to a Google Fonts-available alternative
+    system_font_names = set(_SYSTEM_FONTS.values())
     mapped: set[str] = set()
     for font in raw_fonts:
         if font:
-            mapped.add(_map_font(font))
+            resolved = _map_font(font)
+            if resolved not in system_font_names:
+                mapped.add(resolved)
     return sorted(mapped)
 
 

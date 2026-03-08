@@ -134,6 +134,7 @@ export async function parseFrame(
     const screenshotBytes = await frameNode.exportAsync({
       format: 'PNG',
       constraint: { type: 'SCALE', value: 2 },
+      useAbsoluteBounds: true,
     });
     frameScreenshot = uint8ArrayToBase64(screenshotBytes);
     reportProgress(

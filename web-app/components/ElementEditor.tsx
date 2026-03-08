@@ -5,16 +5,19 @@ import { useEditorStore } from "@/store/useEditorStore";
 import { updateTextContent } from "@/lib/codeMutator";
 import SpacingPanel from "./SpacingPanel";
 import LinkEditor from "./LinkEditor";
+import TextSpacingPanel from "./TextSpacingPanel";
 import type { EditOperation } from "@/types/editor";
 
 const TABS = [
   { key: "text" as const, label: "Text", icon: "T" },
   { key: "spacing" as const, label: "Spacing", icon: "\u2194" },
+  { key: "typography" as const, label: "Typography", icon: "Aa" },
   { key: "link" as const, label: "Link", icon: "\u{1F517}" },
 ];
 
 export default function ElementEditor() {
   const selectedNode = useEditorStore((s) => s.selectedNode);
+  const selectedNodes = useEditorStore((s) => s.selectedNodes);
   const isEditing = useEditorStore((s) => s.isEditing);
   const htmlContent = useEditorStore((s) => s.htmlContent);
   const cssContent = useEditorStore((s) => s.cssContent);
@@ -23,6 +26,8 @@ export default function ElementEditor() {
   const setShowAIFixModal = useEditorStore((s) => s.setShowAIFixModal);
   const activeTab = useEditorStore((s) => s.activeTab);
   const setActiveTab = useEditorStore((s) => s.setActiveTab);
+
+  const multiCount = selectedNodes.length;
 
   const [editText, setEditText] = useState("");
   const [saveFlash, setSaveFlash] = useState(false);
@@ -77,6 +82,11 @@ export default function ElementEditor() {
           <p className="text-xs text-gray-400 truncate">
             <span className="text-blue-400 font-mono">&lt;{selectedNode.tagName}&gt;</span>
             <span className="text-gray-600 ml-1.5">{selectedNode.nodeId}</span>
+            {multiCount > 1 && (
+              <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-600 text-white">
+                +{multiCount - 1}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-1 ml-2">
@@ -120,7 +130,7 @@ export default function ElementEditor() {
       </div>
 
       {/* Tab Content */}
-      <div className="p-4 max-h-80 overflow-y-auto">
+      <div className="p-4 max-h-96 overflow-y-auto">
         {activeTab === "text" && (
           <div className="space-y-3">
             <div>
@@ -166,6 +176,8 @@ export default function ElementEditor() {
         )}
 
         {activeTab === "spacing" && <SpacingPanel />}
+
+        {activeTab === "typography" && <TextSpacingPanel />}
 
         {activeTab === "link" && <LinkEditor />}
       </div>

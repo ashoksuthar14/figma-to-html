@@ -182,6 +182,8 @@ export default function SpacingPanel() {
     const computedStyles = selectedNode.computedStyles ?? {
       marginTop: "0px", marginRight: "0px", marginBottom: "0px", marginLeft: "0px",
       paddingTop: "0px", paddingRight: "0px", paddingBottom: "0px", paddingLeft: "0px",
+      fontSize: "16px", lineHeight: "normal", letterSpacing: "normal",
+      gap: "0px", parentGap: "", parentDisplay: "", parentFlexDirection: "",
     };
 
     const patches = computePositionDelta(deltaX, deltaY, layoutInfo, computedStyles);

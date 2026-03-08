@@ -187,6 +187,7 @@ class TextSegment(_CamelBase):
     characters: str = ""
     font_family: str = "Inter"
     font_weight: int = 400
+    font_style: str = "normal"
     font_size: float = 16.0
     line_height: Optional[float] = None
     line_height_unit: str = "AUTO"
@@ -209,6 +210,10 @@ class TextSegment(_CamelBase):
             for key in ("line_height", "lineHeight"):
                 if data.get(key) == "auto":
                     data[key] = None
+            # Plugin sends 'textCase'; backend field is 'textTransform'
+            tc = data.pop("textCase", None) or data.pop("text_case", None)
+            if tc and tc != "ORIGINAL" and "textTransform" not in data and "text_transform" not in data:
+                data["textTransform"] = tc
             # Plugin sends bare 'color' dict; wrap it into a Fill
             if "color" in data and "fill" not in data:
                 color_val = data.pop("color")
